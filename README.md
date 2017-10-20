@@ -16,6 +16,7 @@ NCCL 1.3.2
 
 ## Usage
 For training:
+
 	CUDA_VISIBLE_DEVICES=0,1,2,3 \
 	python train.py --num_gpus=4 \
 	--model_name='Your model name.' \
@@ -25,6 +26,7 @@ For training:
 	...
 
 For feature extraction:
+
 	CUDA_VISIBLE_DEVICES=0 \
 	python evaluate.py \
 	--model_name='Your model name. \
