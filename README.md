@@ -13,7 +13,7 @@ NCCL 1.3.2
 5. Loss support: *center loss*, *triplet loss*, *A-softmax loss*(coming soon), *Coco Loss*(coming soon).
 6. LFW validation(coming soon...).
 
-Results on mainstream benchmark is coming soon.
+Results on mainstream face recognition benchmarks are coming soon.
 
 \*It is difficult to implement efficient group convolution for ResNeXt on TensorFlow, wait for cudnn7 support.
 
