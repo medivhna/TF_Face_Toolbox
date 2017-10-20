@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,10 +23,9 @@ import time
 from datetime import datetime
 
 import tensorflow as tf
+from data import train_inputs
+from parallel import DataParallel
 from nets.resnext import ResNeXt
-from utils.data import train_inputs
-from utils.saver import DataParallelSaverBuilder
-from utils.parallel import DataParallel
 
 os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 parser = argparse.ArgumentParser()
@@ -69,144 +68,127 @@ parser.add_argument('--save_interval', type=int, default=1000,
                     help='Internal iterations of saving models.')
 FLAGS = parser.parse_args()
 
+
 def FLAGS_assertion():
-    assert FLAGS.data_format in ['NCHW', 'NHWC'], 'Unknown data format.'
-    assert FLAGS.batch_size % FLAGS.num_gpus == 0, (
-        'Batch size must be divisible by number of GPUs')
+  assert FLAGS.data_format in ['NCHW', 'NHWC'], 'Unknown data format.'
+  assert FLAGS.batch_size % FLAGS.num_gpus == 0, (
+    'Batch size must be divisible by number of GPUs')
 
 def get_local_init_ops():
-    local_var_init_op = tf.local_variables_initializer()
-    local_init_ops = [local_var_init_op]
+  local_var_init_op = tf.local_variables_initializer()
+  local_init_ops = [local_var_init_op]
 
-    global_vars = tf.global_variables()
-    var_by_name = dict([(v.name, v) for v in global_vars])
-    copy_ops = []
-    for v in global_vars:
-        split_name = v.name.split('/')
-        if split_name[0] == 'replicated_0' or split_name[-1].startswith('avg') or not v.name.startswith('replicated_'):
-            continue
-        split_name[0] = 'replicated_0'
-        copy_from = var_by_name['/'.join(split_name)]
-        copy_ops.append(v.assign(copy_from.read_value()))
+  global_vars = tf.global_variables()
+  var_by_name = dict([(v.name, v) for v in global_vars])
+  copy_ops = []
+  for v in global_vars:
+    split_name = v.name.split('/')
+    if split_name[0] == 'replicated_0' or split_name[-1].startswith('avg') or not v.name.startswith('replicated_'):
+      continue
+    split_name[0] = 'replicated_0'
+    copy_from = var_by_name['/'.join(split_name)]
+    copy_ops.append(v.assign(copy_from.read_value()))
 
-    with tf.control_dependencies([local_var_init_op]):
-        local_init_ops.extend(copy_ops)
-    local_init_op_group = tf.group(*local_init_ops)
+  with tf.control_dependencies([local_var_init_op]):
+    local_init_ops.extend(copy_ops)
+  local_init_op_group = tf.group(*local_init_ops)
 
-    return local_init_op_group
+  return local_init_op_group
 
 def train():
-    with tf.Graph().as_default(), tf.device('/cpu:0'):
-        # Global graph
-        global_step = tf.train.get_or_create_global_step()
-        # Data
-        images, labels, num_classes, num_examples = train_inputs(FLAGS.data_list_path, 
-                                                                 FLAGS.batch_size, 
-                                                                 FLAGS.is_color, 
-                                                                 input_size=FLAGS.input_size, augment=False,
-                                                                 num_preprocess_threads=FLAGS.num_threads_per_gpu*FLAGS.num_gpus)
-        batches_per_epoch = num_examples // FLAGS.batch_size + 1
+  with tf.Graph().as_default(), tf.device('/cpu:0'):
+    # Global graph
+    global_step = tf.train.get_or_create_global_step()
+    # Data
+    images, labels, num_classes, num_examples = train_inputs(FLAGS.data_list_path, 
+                                                             FLAGS.batch_size, 
+                                                             FLAGS.is_color, 
+                                                             input_size=FLAGS.input_size, 
+                                                             augment=False,
+                                                             num_preprocess_threads=FLAGS.num_threads_per_gpu*FLAGS.num_gpus)
+    batches_per_epoch = num_examples // FLAGS.batch_size + 1
 
-        # Network
-        network = ResNeXt(num_layers=50, num_card=1, data_format=FLAGS.data_format)
+    # Network
+    network = ResNeXt(num_layers=50, num_card=1, data_format=FLAGS.data_format)
 
-        # DataParallel
-        model = DataParallel(network, 
-                             init_lr=FLAGS.init_lr, 
-                             decay_epoch=FLAGS.lr_decay_epoch, 
-                             decay_rate=FLAGS.lr_decay_rate,
-                             batches_per_epoch=batches_per_epoch, 
-                             num_gpus=FLAGS.num_gpus)
+    # DataParallel
+    model = DataParallel(network, 
+               init_lr=FLAGS.init_lr, 
+               decay_epoch=FLAGS.lr_decay_epoch, 
+               decay_rate=FLAGS.lr_decay_rate,
+               batches_per_epoch=batches_per_epoch, 
+               num_gpus=FLAGS.num_gpus)
 
-        # Inference
-        train_ops, lr, losses, losses_name = model(images=images, labels=labels, num_classes=num_classes)
+    # Inference
+    train_ops, lr, losses, losses_name = model(images=images, labels=labels, num_classes=num_classes)
 
-        # Saver
-        saver = tf.train.Saver(tf.global_variables(), max_to_keep=20,
-                               builder=DataParallelSaverBuilder())
+    # Saver
+    saver = tf.train.Saver(model.vars(), max_to_keep=20)
 
-        # Supervisor
-        sv = tf.train.Supervisor(logdir=os.path.join(FLAGS.train_dir, FLAGS.model_name),
-                                 local_init_op=get_local_init_ops(),
-                                 saver=saver,
-                                 global_step=global_step,
-                                 save_model_secs=0)
+    # Supervisor
+    sv = tf.train.Supervisor(logdir=os.path.join(FLAGS.train_dir, FLAGS.model_name),
+                 local_init_op=get_local_init_ops(),
+                 saver=saver,
+                 global_step=global_step,
+                 save_model_secs=0)
 
-        # Session config
-        config = tf.ConfigProto(allow_soft_placement=True,
-                                log_device_placement=False,
-                                gpu_options=tf.GPUOptions(allow_growth=True))
-        run_metadata = tf.RunMetadata()
+    # Session config
+    config = tf.ConfigProto(allow_soft_placement=True,
+                log_device_placement=False,
+                gpu_options=tf.GPUOptions(allow_growth=True))
 
-        # Format string 
-        format_str = '[%s] Epoch/Step %d/%d, lr = %g\n'
-        for loss_id, loss_name in enumerate(losses_name):
-            format_str += '[%s]      Loss #'+str(loss_id)+': '+loss_name+' = %.6f\n'
-        format_str += '[%s]      batch_time = %.1fms/batch, throughput = %.1fimages/s'
+    # Format string 
+    format_str = '[%s] Epoch/Step %d/%d, lr = %g\n'
+    for loss_id, loss_name in enumerate(losses_name):
+      format_str += '[%s]    Loss #'+str(loss_id)+': '+loss_name+' = %.6f\n'
+    format_str += '[%s]    batch_time = %.1fms/batch, throughput = %.1fimages/s'
 
-        # Training session
-        with sv.managed_session(config=config) as sess:
-            ckpt = tf.train.get_checkpoint_state(os.path.join(FLAGS.model_dir, FLAGS.model_name))
-            if ckpt and ckpt.model_checkpoint_path:
-                saver.restore(sess, ckpt.model_checkpoint_path)
-                print('Model restored from %s' % os.path.join(FLAGS.model_dir, FLAGS.model_name))
-            else:
-                print('Network parameters initialized from scratch.')
+    # Training session
+    with sv.managed_session(config=config) as sess:
+      ckpt = tf.train.get_checkpoint_state(os.path.join(FLAGS.model_dir, FLAGS.model_name))
+      if ckpt and ckpt.model_checkpoint_path:
+        saver.restore(sess, ckpt.model_checkpoint_path)
+        print('Model restored from %s' % os.path.join(FLAGS.model_dir, FLAGS.model_name))
+      else:
+        print('Network parameters initialized from scratch.')
 
-            print('%s training start...' % FLAGS.model_name)
-            # I/O ops
-            tf.train.start_queue_runners(sess=sess)
+      print('%s training start...' % FLAGS.model_name)
+      # I/O ops
+      tf.train.start_queue_runners(sess=sess)
 
-            step = 0
-            epoch = 1
-            while epoch <= FLAGS.max_epoches:
-                step = sess.run(global_step)
-                epoch = step // batches_per_epoch + 1
+      step = 0
+      epoch = 1
+      while epoch <= FLAGS.max_epoches:
+        step = sess.run(global_step)
+        epoch = step // batches_per_epoch + 1
 
-                start_time = time.time()
-                output = sess.run([train_ops, lr]+losses)
-                learning_rate = output[1]
-                losses_value = output[2:]
-                duration = time.time() - start_time
+        start_time = time.time()
+        output = sess.run([train_ops, lr]+losses)
+        learning_rate = output[1]
+        losses_value = output[2:]
+        duration = time.time() - start_time
 
+        if step % FLAGS.display_interval == 0:
+          examples_per_sec = FLAGS.batch_size / duration
+          sec_per_batch = duration * 1000
 
-                if step % FLAGS.display_interval == 0:
-                    examples_per_sec = FLAGS.batch_size / duration
-                    sec_per_batch = duration * 1000
+          # Format tuple
+          format_list = [datetime.now(), epoch, step, learning_rate]
+          for loss_value in losses_value:
+            format_list.extend([datetime.now(), loss_value])
+          format_list.extend([datetime.now(), sec_per_batch, examples_per_sec])
+          print(format_str % tuple(format_list))
 
-                    # Format tuple
-                    format_list = [datetime.now(), epoch, step, learning_rate]
-                    for loss_value in losses_value:
-                        format_list.extend([datetime.now(), loss_value])
-                    format_list.extend([datetime.now(), sec_per_batch, examples_per_sec])
-                    print(format_str % tuple(format_list))
-
-                    if (step > 0 and step % FLAGS.save_interval == 0) or step == FLAGS.max_epoches*batches_per_epoch:
-                        train_path = os.path.join(FLAGS.model_dir, FLAGS.model_name, FLAGS.model_name+'.ckpt')
-                        saver.save(sess, train_path, global_step=step)
-                        print('[%s]: Model has been saved in Iteration %d' % (datetime.now(), step))
+          if (step > 0 and step % FLAGS.save_interval == 0) or step == FLAGS.max_epoches*batches_per_epoch:
+            train_path = os.path.join(FLAGS.model_dir, FLAGS.model_name, FLAGS.model_name+'.ckpt')
+            saver.save(sess, train_path, global_step=step)
+            print('[%s]: Model has been saved in Iteration %d' % (datetime.now(), step))
 
 def main(argv=None):
-    FLAGS_assertion()
-    tf.gfile.MakeDirs(os.path.join(FLAGS.train_dir, FLAGS.model_name))
-    tf.gfile.MakeDirs(os.path.join(FLAGS.model_dir, FLAGS.model_name))
-    train()
+  FLAGS_assertion()
+  tf.gfile.MakeDirs(os.path.join(FLAGS.train_dir, FLAGS.model_name))
+  tf.gfile.MakeDirs(os.path.join(FLAGS.model_dir, FLAGS.model_name))
+  train()
 
 if __name__ == '__main__':
-    tf.app.run()
-
-
-                # = sess.run(losses)
-                # if step < 10:
-                #   sess.run([train_ops, lr]+losses)
-                # else:
-                #     from tensorflow.python.client import timeline
-                #     sess.run([train_ops, lr]+losses,
-                #              options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
-                #                                    run_metadata=run_metadata)
-                #     trace = timeline.Timeline(step_stats=run_metadata.step_stats)
-                #     with open('timeline5.ctf.json', 'w') as trace_file:
-                #         trace_file.write(trace.generate_chrome_trace_format())
-                #     print('Done.')
-                #     return 
-                #print('step %d: %.2fms' % (step, duration*1000))
+  tf.app.run()

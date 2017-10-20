@@ -17,12 +17,12 @@ import tensorflow as tf
 from tensorflow.contrib import layers
 from tensorflow.contrib.framework import arg_scope
 
-class ResNeXt(object):
+class SENet(object):
   def __init__(self, num_layers=50, 
                num_card=32, 
                weight_decay=0.0005, 
                data_format='NCHW', 
-               name='ResNeXt'):
+               name='SENet'):
     assert (num_layers-2)%3==0, "num_layers-2 must be divided by 3."
     self.num_layers = num_layers
     self.num_card = num_card
@@ -44,7 +44,7 @@ class ResNeXt(object):
 
     self.name = name+'-'+str(num_layers)
 
-  def resBlock(self, x, 
+  def SEresBlock(self, x, 
                num_outputs, 
                stride=1, 
                activation_fn=tf.nn.relu, 
@@ -53,17 +53,33 @@ class ResNeXt(object):
     assert num_outputs%self.channel_factor==0, "num_outputs must be divided by channel_factor %d." % self.channel_factor
     assert num_outputs%self.num_card==0, "num_outputs must be divided by num_card %d." % self.num_card
 
-    # Data format
     with tf.variable_scope(scope, 'resBlock'):
       shortcut = x
       if stride != 1 or x.get_shape()[3] != num_outputs:
-        shortcut = layers.conv2d(shortcut, num_outputs, kernel_size=1, stride=stride, 
+        shortcut = tcl.conv2d(shortcut, num_outputs, kernel_size=1, stride=stride, 
                               activation_fn=None, normalizer_fn=None, scope='shortcut')
 
-      x = layers.conv2d(x, num_outputs/self.channel_factor, kernel_size=1, stride=1)
-      x = layers.conv2d(x, num_outputs/self.channel_factor, kernel_size=3, stride=stride)
-      x = layers.conv2d(x, num_outputs, kernel_size=1, stride=1, 
-                        activation_fn=None, normalizer_fn=None)
+      x = tcl.conv2d(x, num_outputs/self.channel_factor, kernel_size=1, stride=1)
+      x = tcl.conv2d(x, num_outputs/self.channel_factor, kernel_size=3, stride=stride)
+      x = tcl.conv2d(x, num_outputs, kernel_size=1, stride=1, activation_fn=None, normalizer_fn=None)
+
+      # SE Part
+      if self.data_format == 'NCHW':
+        w = tf.reduce_mean(x, [2, 3])
+        w = tf.reshape(w, [-1, net.get_shape().as_list()[1]])
+      else:
+        w = tf.reduce_mean(x, [1, 2])
+        w = tf.reshape(w, [-1, net.get_shape().as_list()[-1]])
+      w = tcl.fully_connected(w, num_outputs=num_outputs/16, activation_fn=tf.nn.relu, 
+                             weights_regularizer=tcl.l2_regularizer(self.weight_decay))
+      w = tcl.fully_connected(w, num_outputs=num_outputs, activation_fn=tf.nn.sigmoid, 
+                             weights_regularizer=tcl.l2_regularizer(self.weight_decay))
+      if self.data_format == 'NCHW':
+        w = tf.reshape(w, [-1, 1, 1, w.get_shape().as_list()[-1]])
+        x = x * tf.tile(w, [1, 1]+x.get_shape().as_list()[2:])
+      else:
+        w = tf.reshape(w, [-1, w.get_shape().as_list()[1], 1, 1])
+        x = x * tf.tile(w, [1]+x.get_shape().as_list()[1:3]+[1])
       
       x += shortcut
 
@@ -92,19 +108,19 @@ class ResNeXt(object):
                                     padding='SAME', data_format=self.data_format)
 
           with tf.variable_scope('conv2'):
-            net = layers.repeat(net, self.num_block[0], self.resBlock, self.num_outputs[0])
+            net = layers.repeat(net, self.num_block[0], self.SEresBlock, self.num_outputs[0])
 
           with tf.variable_scope('conv3'):
             net = self.resBlock(net, num_outputs=self.num_outputs[1], stride=2)
-            net = layers.repeat(net, self.num_block[1]-1, self.resBlock, self.num_outputs[1])
+            net = layers.repeat(net, self.num_block[1]-1, self.SEresBlock, self.num_outputs[1])
 
           with tf.variable_scope('conv4'):
             net = self.resBlock(net, num_outputs=self.num_outputs[2], stride=2)
-            net = layers.repeat(net, self.num_block[2]-1, self.resBlock, self.num_outputs[2])
+            net = layers.repeat(net, self.num_block[2]-1, self.SEresBlock, self.num_outputs[2])
 
           with tf.variable_scope('conv5'):
             net = self.resBlock(net, num_outputs=self.num_outputs[3], stride=2)
-            net = layers.repeat(net, self.num_block[3]-1, self.resBlock, self.num_outputs[3])
+            net = layers.repeat(net, self.num_block[3]-1, self.SEresBlock, self.num_outputs[3])
 
           if self.data_format == 'NCHW':
             net = tf.reduce_mean(net, [2, 3])
