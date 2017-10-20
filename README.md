@@ -2,6 +2,7 @@
 
 ## Requirement
 TensorFlow r1.3 or above.
+
 NCCL 1.3.2
 
 ## Features
@@ -10,7 +11,9 @@ NCCL 1.3.2
 3. Random mirror/rotation/brightness/contrast/hue(RGB only)/saturation(RGB only) data augmentation.
 4. Network support: *ResNeXt*\*, *MobileNet*, *ShuffleNet*, *SENet*, *SphereFaceNet*.
 5. Loss support: *center loss*, *triplet loss*, *A-softmax loss*(coming soon), *Coco Loss*(coming soon).
-6. LFW validation (Coming soon...)
+6. LFW validation(coming soon...).
+
+Results on mainstream benchmark is coming soon.
 
 \*It is difficult to implement efficient group convolution for ResNeXt on TensorFlow, wait for cudnn7 support.
 
