@@ -18,7 +18,6 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import nccl
 from tensorflow.contrib.layers import fully_connected, l2_regularizer
-#from layers.margin_fully_connected import margin_fully_connected
 
 def loss_function(logits, labels, scope=None):
   losses = []
@@ -43,9 +42,6 @@ def loss_function(logits, labels, scope=None):
     loss_name = re.sub('TOWER_[0-9]*/', '', l.op.name)
     tf.summary.scalar(loss_name +' (raw)', l)
     tf.summary.scalar(loss_name, loss_averages.average(l))
-  #with tf.control_dependencies([loss_averages_op]):
-  #  for idx in xrange(len(losses)):
-  #    losses[idx] = tf.identity(losses[idx])
 
   return losses, losses_name
 
@@ -79,11 +75,6 @@ class DataParallel(object):
             logits = fully_connected(pre_logits, num_outputs=inputs['num_classes'], 
                                      activation_fn=None, biases_initializer=None,
                                      weights_regularizer=l2_regularizer(0.0005))
-            # TODO: A-softmax Large-Margin InnerProduct Layer
-            # logits, m = margin_fully_connected(pre_logits, labels_splits[device_id], 
-            #                                    is_training=True, num_outputs=inputs['num_classes'], 
-            #                                    weights_regularizer=l2_regularizer(0.0005),
-            #                                    alpha1=0.6, alpha2=0.8, max_m=8.0)
             # Losses
             losses, losses_name = loss_function(logits, labels_splits[device_id], scope=name_scope)
             total_loss = tf.add_n(losses, name='total_loss')
@@ -138,10 +129,6 @@ class DataParallel(object):
     global_step = tf.train.get_global_step()
     global_step_op = global_step.assign_add(1)
     train_ops = tf.group(*(tower_train_ops+update_ops+[global_step_op]))
-
-    # m_val
-    # allreduce_losses.append(m)
-    # losses_name.append('m_val')
 
     return train_ops, self.lr, allreduce_losses, losses_name
 

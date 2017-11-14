@@ -24,24 +24,30 @@ from datetime import datetime
 
 import tensorflow as tf
 from data import train_inputs
-from parallel import DataParallel
-from nets.resnext import ResNeXt
+from parallel_orig import DataParallel
+from saver import DataParallelSaverBuilder
+from nets.factory import net_select
 
 os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 parser = argparse.ArgumentParser()
+# Name configures
+parser.add_argument('--net_name', type=str,
+                    help='Name of the network architecture.')
+parser.add_argument('--model_name', type=str,
+                    help='Name of the training model.')
 # Directory configures
 parser.add_argument('--train_dir', type=str, default='train',
                     help='Root directory where to write event logs.')
 parser.add_argument('--model_dir', type=str, default='models',
                     help='Root directory where to save checkpoints.')
-parser.add_argument('--model_name', type=str,
-                    help='Name of the training model.')
 # Data configure
 parser.add_argument('--data_format', type=str, default='NCHW',
                     help='The format of data in the network (NCHW(default) or NHWC).')
-parser.add_argument('--input_size', type=int, default=128,
-                    help='The size of input images.')
-parser.add_argument('--is_color', type=bool, default=True, 
+parser.add_argument('--input_height', type=int, default=128,
+                    help='The height of input images.')
+parser.add_argument('--input_width', type=int, default=128,
+                    help='The width of input images.')
+parser.add_argument('--is_color', type=int, default=1, 
                     help='Whether to read inputs as RGB images.')
 parser.add_argument('--data_list_path', type=str, 
                     help='Path to the list of training data.')
@@ -103,30 +109,32 @@ def train():
     images, labels, num_classes, num_examples = train_inputs(FLAGS.data_list_path, 
                                                              FLAGS.batch_size, 
                                                              FLAGS.is_color, 
-                                                             input_size=FLAGS.input_size, 
+                                                             input_height=FLAGS.input_height, 
+                                                             input_width=FLAGS.input_width, 
                                                              augment=False,
                                                              num_preprocess_threads=FLAGS.num_threads_per_gpu*FLAGS.num_gpus)
     batches_per_epoch = num_examples // FLAGS.batch_size + 1
 
     # Network
-    network = ResNeXt(num_layers=50, num_card=1, data_format=FLAGS.data_format)
+    network = net_select(FLAGS.net_name, data_format=FLAGS.data_format)
 
     # DataParallel
     model = DataParallel(network, 
-               init_lr=FLAGS.init_lr, 
-               decay_epoch=FLAGS.lr_decay_epoch, 
-               decay_rate=FLAGS.lr_decay_rate,
-               batches_per_epoch=batches_per_epoch, 
-               num_gpus=FLAGS.num_gpus)
+                         init_lr=FLAGS.init_lr, 
+                         decay_epoch=FLAGS.lr_decay_epoch, 
+                         decay_rate=FLAGS.lr_decay_rate,
+                         batches_per_epoch=batches_per_epoch, 
+                         num_gpus=FLAGS.num_gpus)
 
     # Inference
     train_ops, lr, losses, losses_name = model(images=images, labels=labels, num_classes=num_classes)
 
     # Saver
-    saver = tf.train.Saver(model.vars(), max_to_keep=20)
+    saver = tf.train.Saver(tf.global_variables(), max_to_keep=20,
+                           builder=DataParallelSaverBuilder())
 
     # Supervisor
-    sv = tf.train.Supervisor(logdir=os.path.join(FLAGS.train_dir, FLAGS.model_name),
+    sv = tf.train.Supervisor(logdir=os.path.join(FLAGS.train_dir, FLAGS.net_name+'_'+FLAGS.model_name),
                  local_init_op=get_local_init_ops(),
                  saver=saver,
                  global_step=global_step,
@@ -145,17 +153,14 @@ def train():
 
     # Training session
     with sv.managed_session(config=config) as sess:
-      ckpt = tf.train.get_checkpoint_state(os.path.join(FLAGS.model_dir, FLAGS.model_name))
+      ckpt = tf.train.get_checkpoint_state(os.path.join(FLAGS.model_dir, FLAGS.net_name+'_'+FLAGS.model_name))
       if ckpt and ckpt.model_checkpoint_path:
         saver.restore(sess, ckpt.model_checkpoint_path)
-        print('Model restored from %s' % os.path.join(FLAGS.model_dir, FLAGS.model_name))
+        print('Model restored from %s' % os.path.join(FLAGS.model_dir, FLAGS.net_name+'_'+FLAGS.model_name))
       else:
         print('Network parameters initialized from scratch.')
 
-      print('%s training start...' % FLAGS.model_name)
-      # I/O ops
-      tf.train.start_queue_runners(sess=sess)
-
+      print('%s training start...' % (FLAGS.net_name+'_'+FLAGS.model_name))
       step = 0
       epoch = 1
       while epoch <= FLAGS.max_epoches:
@@ -180,14 +185,14 @@ def train():
           print(format_str % tuple(format_list))
 
           if (step > 0 and step % FLAGS.save_interval == 0) or step == FLAGS.max_epoches*batches_per_epoch:
-            train_path = os.path.join(FLAGS.model_dir, FLAGS.model_name, FLAGS.model_name+'.ckpt')
+            train_path = os.path.join(FLAGS.model_dir, FLAGS.net_name+'_'+FLAGS.model_name, FLAGS.net_name+'_'+FLAGS.model_name+'.ckpt')
             saver.save(sess, train_path, global_step=step)
             print('[%s]: Model has been saved in Iteration %d' % (datetime.now(), step))
 
 def main(argv=None):
   FLAGS_assertion()
-  tf.gfile.MakeDirs(os.path.join(FLAGS.train_dir, FLAGS.model_name))
-  tf.gfile.MakeDirs(os.path.join(FLAGS.model_dir, FLAGS.model_name))
+  tf.gfile.MakeDirs(os.path.join(FLAGS.train_dir, FLAGS.net_name+'_'+FLAGS.model_name))
+  tf.gfile.MakeDirs(os.path.join(FLAGS.model_dir, FLAGS.net_name+'_'+FLAGS.model_name))
   train()
 
 if __name__ == '__main__':
