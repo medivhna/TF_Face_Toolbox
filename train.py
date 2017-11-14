@@ -24,7 +24,7 @@ from datetime import datetime
 
 import tensorflow as tf
 from data import train_inputs
-from parallel_orig import DataParallel
+from parallel import DataParallel
 from saver import DataParallelSaverBuilder
 from nets.factory import net_select
 
