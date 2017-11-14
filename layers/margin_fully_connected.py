@@ -73,7 +73,7 @@ class Margin_Dense(base.Layer):
         beta = tf.maximum(self.min_lambda, self.base*tf.pow(1+self.gamma*tf.cast(global_step, tf.float32), self.power))
         # sign
         k = tf.floor(self.m*label_theta/math.pi)
-        x_phi_theta = (tf.squeeze(inputs_norm)*tf.cos(self.m*label_theta+k*math.pi)-2.*k + beta*label_outputs)/(beta+1.0)
+        x_phi_theta = (tf.squeeze(inputs_norm)*(tf.cos(self.m*label_theta+k*math.pi)-2.*k) + beta*label_outputs)/(beta+1.0)
         # m_theta update
         m_outputs = tf.scatter_nd(nd_indices, x_phi_theta-label_outputs, shape=output_shape)
         outputs += m_outputs
