@@ -57,9 +57,10 @@ class Margin_Dense(base.Layer):
 
     def call(self, inputs, labels, global_step):
         inputs = tf.convert_to_tensor(inputs, dtype=self.dtype)
+        # norms
         inputs_norm = tf.norm(inputs, axis=1, keep_dims=True, name='inputs_norm')
         kernel_norm = tf.norm(self.kernel, axis=0, keep_dims=True, name='kernel_norm')
-        # output, theta, x_norm
+        # output inference
         outputs = tf.matmul(inputs, self.kernel/kernel_norm)
         theta = tf.acos(outputs/inputs_norm)
         # shape
@@ -68,9 +69,8 @@ class Margin_Dense(base.Layer):
         nd_indices = tf.stack([tf.range(output_shape[0], dtype=tf.int32), labels], axis=1)
         label_outputs = tf.gather_nd(outputs, nd_indices)
         label_theta = tf.gather_nd(theta, nd_indices)
-
-        beta = tf.maximum(min_lambda, base*tf.pow(1+gamma*tf.cast(global_step, tf.float32), self.power))
-
+        # beta
+        beta = tf.maximum(self.min_lambda, self.base*tf.pow(1+self.gamma*tf.cast(global_step, tf.float32), self.power))
         # sign
         k = tf.floor(self.m*label_theta/math.pi)
         x_phi_theta = (tf.squeeze(inputs_norm)*tf.cos(self.m*label_theta+k*math.pi)-2.*k + beta*label_outputs)/(beta+1.0)
