@@ -16,6 +16,7 @@ NCCL 1.3.2
 Results on mainstream face recognition benchmarks are coming soon.
 
 \*It is difficult to implement efficient group convolution for ResNeXt on TensorFlow, wait for cudnn7 support.
+
 \*\* As far as we know, this is the first implementation of A-softmax loss with TensorFlow on GitHub.
 
 ## Usage
