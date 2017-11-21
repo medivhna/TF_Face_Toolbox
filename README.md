@@ -10,13 +10,12 @@ NCCL 1.3.2
 2. Stable and efficient Multi-GPU training support.
 3. TensorFlow Dataset API support for efficient I/O from Caffe style lists.
 4. Random mirror/rotation/brightness/contrast/hue(RGB only)/saturation(RGB only) data augmentation.
-5. Network support: *ResNeXt*\*, *MobileNet*, *ShuffleNet*, *SENet*, *SphereFaceNet*, *LightCNN*(coming soon).
-6. Loss support: *center loss*, *triplet loss*, *A-softmax loss*\*\*, *Coco Loss*(coming soon).
+5. Network support: *ResNeXt*, *MobileNet*, *ShuffleNet*, *SENet*, *SphereFaceNet*, *LightCNN*(coming soon).
+6. Loss support: *center loss*, *triplet loss*, *A-softmax loss*\*, *Coco Loss*(coming soon).
 
 Results on mainstream face recognition benchmarks are coming soon.
 
-\*It is difficult to implement efficient group convolution for ResNeXt on TensorFlow, wait for cudnn7 support.
-\*\* Something wrong with the implementation of A-softmax loss, caution to use.
+\* As far as we know, our code is the first A-softmax loss implementation in TensorFlow. We can reproduce the experiment with LFW accuracy **99.20%**
 
 ## Usage
 For training:
