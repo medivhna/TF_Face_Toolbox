@@ -67,7 +67,8 @@ class Margin_Dense(base.Layer):
         label_outputs = tf.gather_nd(outputs, nd_indices)
         label_theta = tf.gather_nd(theta, nd_indices)
 
-        beta = tf.maximum(5.0, 1500*tf.pow(1+0.1*tf.cast(global_step, tf.float32), -1))
+        # We recommend min_lambda=5, base=1500, gamma=0.1, power=-1
+        beta = tf.maximum(self.min_lambda, self.base*tf.pow(1+self.gamma*tf.cast(global_step, tf.float32), self.power))
 
         # sign
         k = tf.floor(self.m*label_theta/math.pi)
