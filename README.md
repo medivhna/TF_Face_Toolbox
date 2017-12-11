@@ -15,7 +15,7 @@ NCCL 1.3.2
 
 Results on mainstream face recognition benchmarks are coming soon.
 
-\* As far as we know, our code is the first A-softmax loss implementation in TensorFlow. @shangwenxiang reproduced the LFW accuracy **99.4%** on SphereFaceNet-20 with this implementation.
+\* As far as we know, our code is the first A-softmax loss implementation in TensorFlow. [@shangwenxiang](https://github.com/shangwenxiang) claims to reproduce the LFW accuracy **99.4%** on SphereFaceNet-20 with our implementation. It exceed the results for original implementation.
 
 ## Usage
 For training:
