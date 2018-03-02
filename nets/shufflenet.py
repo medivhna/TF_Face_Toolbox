@@ -46,7 +46,7 @@ class ShuffleNet(object):
       # Version check. Because NCHW data format is not supported in 
       # 'tf.contrib.layers.separable_conv2d' before TensorFlow r1.3
       major, minor, _ = tf.__version__.split('.')
-      assert (int(major) == 1 and int(major) >= 3) or int(major) > 1, 'Not supported TensorFlow version. Please update to TensorFlow r1.3 or above.'
+      assert (int(major) == 1 and int(minor) >= 3) or int(major) > 1, 'Not supported TensorFlow version. Please update to TensorFlow r1.3 or above.'
 
     self.weight_decay = weight_decay
 
