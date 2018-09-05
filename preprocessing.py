@@ -1,4 +1,4 @@
-# Copyright 2017 Medivhna. All Rights Reserved.
+# Copyright 2017 Guanshuo Wang. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,35 +19,34 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.image import transform
 
-NUM_ANGMENTATION_SUPPORT = 4
-
-def data_augment(image):
-  aug_num = np.random.randint(low=0, high=NUM_ANGMENTATION_SUPPORT)
-  aug_queue = np.random.permutation(NUM_ANGMENTATION_SUPPORT)[0:aug_num]
-  for aug_idx in aug_queue:
-    if aug_idx == 0:
-      image = tf.image.random_flip_left_right(image)
-    elif aug_idx == 1:
-      image = _random_zoom_in_out(image, min_rate=0.2)
-    elif aug_idx == 2:
-      if num_channels == 1:
-        image = tf.image.random_brightness(image, 0.5)
-      elif num_channels == 3:
-        image = tf.image.random_hue(image, 0.25)
-    elif aug_idx == 3:
-      if num_channels == 1:
-        image = tf.image.random_contrast(image, 0.2, 0.8)
-      elif num_channels == 3:
-        image = tf.image.random_saturation(image, 0.3, 0.8)
-
+def data_augmentation(image):
+  num_channels = image.get_shape().as_list()[-1]
+  image = tf.image.random_flip_left_right(image)
+  delta = tf.random_uniform(shape=[], minval=0, maxval=0.2)
+  image = tf.cond(tf.less(delta, 0.1),
+                  lambda: tf.image.adjust_brightness(image, -delta),
+                  lambda: image)
+  if num_channels == 3:
+    delta = tf.random_uniform(shape=[], minval=0, maxval=0.4)
+    image = tf.cond(tf.less(delta, 0.2),
+                    lambda: tf.image.adjust_hue(image, -delta),
+                    lambda: image)    
+    delta = tf.random_uniform(shape=[], minval=0.6, maxval=1.4)
+    image = tf.cond(tf.less(delta, 1.0),
+                    lambda: tf.image.adjust_saturation(image, delta),
+                    lambda: image)
   return image
 
-def _random_zoom_in_out(image, min_rate=0.5):
-  source_size = image.get_shape().as_list()[1]
-  min_size = int(min_rate*source_size)
-  target_size = random.randint(min_size, source_size)
 
-  image = tf.image.resize_images(image, [source_size, source_size])
+def _random_zoom_in_out(image, rand_rate=0.5):
+  assert rand_rate <= 1.0 and rand_rate >= 0.5
+  scale = tf.random_uniform([], 1.0-rand_rate, 2.0-rand_rate)
+  scale = tf.minimum(scale, 1.0)
+  source_shape = tf.cast(image.get_shape()[0:2], dtype=tf.int32)
+  target_shape = tf.cast(scale*tf.cast(source_shape, dtype=tf.float32), dtype=tf.int32)
+
+  image = tf.image.resize_images(image, target_shape)
+  image = tf.image.resize_images(image, source_shape)
 
   return image
 

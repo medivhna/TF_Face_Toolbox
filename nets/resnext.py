@@ -1,4 +1,4 @@
-# Copyright 2017 Medivhna. All Rights Reserved.
+# Copyright 2018 Guanshuo Wang. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,34 +15,21 @@
 
 import tensorflow as tf
 from tensorflow.contrib import layers
-from tensorflow.contrib.framework import arg_scope
 
-class ResNeXt(object):
-  def __init__(self, num_layers=50, 
+from resnet import ResNet
+
+class ResNeXt(ResNet):
+  def __init__(self, 
+               num_layers, 
                num_card=32, 
                weight_decay=0.0005, 
                data_format='NCHW', 
                name='ResNeXt'):
-    assert (num_layers-2)%3==0, "num_layers-2 must be divided by 3."
-    self.num_layers = num_layers
     self.num_card = num_card
-
-    self.channel_factor = 2 if num_card > 1 else 4
-    if self.num_layers in [50, 101]:
-      self.num_block=[3, 4, (self.num_layers-32)/3, 3]
-    elif self.num_layers == 152:
-      self.num_block=[3, 8, 36, 3]
-    elif self.num_layers == 26:
-      self.num_block=[2, 2, 2, 2]
-    else:
-      raise ValueError('Unsupported num_layers.')
-    self.num_outputs=[256, 512, 1024, 2048]
-
-    assert data_format in ['NCHW', 'NHWC'], 'Unknown data format.'
-    self.data_format = data_format
-    self.weight_decay = weight_decay
-
-    self.name = name+'-'+str(num_layers)
+    super(ResNeXt, self).__init__(num_layers, 
+                                  weight_decay=weight_decay, 
+                                  data_format=data_format, 
+                                  name=name)
 
   def resBlock(self, x, 
                num_outputs, 
@@ -50,77 +37,31 @@ class ResNeXt(object):
                activation_fn=tf.nn.relu, 
                normalizer_fn=layers.batch_norm, 
                scope=None):
-    assert num_outputs%self.channel_factor==0, "num_outputs must be divided by channel_factor %d." % self.channel_factor
-    assert num_outputs%self.num_card==0, "num_outputs must be divided by num_card %d." % self.num_card
+    # Group convolution
+    def _group_conv2d(x, num_outputs, num_group, stride=1, scope=''):
+      assert num_outputs%num_group==0, "num_outputs must be divided by num_group %d." % num_group
+      x_groups = tf.split(x, self.num_card, axis=self.channel_axis)
+      y_groups = []
+      for idx, x_split in enumerate(x_groups):
+        y = layers.conv2d(x_split, num_outputs/num_group, kernel_size=3, stride=stride,
+                          scope=scope+'_group_%d'%idx)
+        y_groups.append(y)
+      x = tf.concat(y_groups, axis=self.channel_axis)
 
-    # Data format
+      return x
+
+    assert num_outputs%2==0, "num_outputs must be divided by 2."
     with tf.variable_scope(scope, 'resBlock'):
       shortcut = x
-      if stride != 1 or x.get_shape()[3] != num_outputs:
+      if stride != 1 or x.get_shape()[self.channel_axis] != num_outputs:
         shortcut = layers.conv2d(shortcut, num_outputs, kernel_size=1, stride=stride, 
-                              activation_fn=None, normalizer_fn=None, scope='shortcut')
+                                 activation_fn=None, scope='conv_1x1_shortcut')
 
-      x = layers.conv2d(x, num_outputs/self.channel_factor, kernel_size=1, stride=1)
-      x = layers.conv2d(x, num_outputs/self.channel_factor, kernel_size=3, stride=stride)
-      x = layers.conv2d(x, num_outputs, kernel_size=1, stride=1, 
-                        activation_fn=None, normalizer_fn=None)
+      x = layers.conv2d(x, num_outputs/2, kernel_size=1, stride=1, scope='conv1_1x1')
+      x = _group_conv2d(x, num_outputs/2, kernel_size=3, num_group=self.num_card, stride=stride, scope='conv2_3x3')
+      x = layers.conv2d(x, num_outputs, kernel_size=1, stride=1, activation_fn=None, scope='conv3_1x1')
       
       x += shortcut
-
-      x = normalizer_fn(x)
       x = activation_fn(x)
 
     return x
-
-  def __call__(self, inputs, is_training=False, reuse=None):
-    with tf.variable_scope(self.name, reuse=reuse):
-      with arg_scope([layers.batch_norm], scale=True, fused=True, 
-                      data_format=self.data_format, 
-                      is_training=is_training):
-        with arg_scope([layers.conv2d], activation_fn=tf.nn.relu, 
-                        normalizer_fn=layers.batch_norm, 
-                        biases_initializer=None, 
-                        weights_regularizer=layers.l2_regularizer(self.weight_decay),
-                        data_format=self.data_format):
-
-          if self.data_format == 'NCHW':
-            inputs = tf.transpose(inputs, [0, 3, 1, 2])
-
-          with tf.variable_scope('conv1'):
-            net = layers.conv2d(inputs, num_outputs=64, kernel_size=7, stride=2)
-            net = layers.max_pool2d(net, kernel_size=3, stride=2, 
-                                    padding='SAME', data_format=self.data_format)
-
-          with tf.variable_scope('conv2'):
-            net = layers.repeat(net, self.num_block[0], self.resBlock, self.num_outputs[0])
-
-          with tf.variable_scope('conv3'):
-            net = self.resBlock(net, num_outputs=self.num_outputs[1], stride=2)
-            net = layers.repeat(net, self.num_block[1]-1, self.resBlock, self.num_outputs[1])
-
-          with tf.variable_scope('conv4'):
-            net = self.resBlock(net, num_outputs=self.num_outputs[2], stride=2)
-            net = layers.repeat(net, self.num_block[2]-1, self.resBlock, self.num_outputs[2])
-
-          with tf.variable_scope('conv5'):
-            net = self.resBlock(net, num_outputs=self.num_outputs[3], stride=2)
-            net = layers.repeat(net, self.num_block[3]-1, self.resBlock, self.num_outputs[3])
-
-          if self.data_format == 'NCHW':
-            net = tf.reduce_mean(net, [2, 3])
-            net = tf.reshape(net, [-1, net.get_shape().as_list()[1]])
-          else:
-            net = tf.reduce_mean(net, [1, 2])
-            net = tf.reshape(net, [-1, net.get_shape().as_list()[-1]])
-
-          if is_training:
-            net = layers.dropout(net, keep_prob=0.5)
-
-          pre_logits = layers.fully_connected(net, num_outputs=128, activation_fn=None, 
-                          weights_regularizer=layers.l2_regularizer(self.weight_decay))
-
-    return pre_logits
-
-  @property
-  def variables(self):
-    return tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
